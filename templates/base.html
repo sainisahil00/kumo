@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050c2b">
+  <meta name="csrf" content="{{ csrf_token() }}">
+  <title>{% block title %}Kumo{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/kumo.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kumo.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css') }}">
+  <script>document.documentElement.classList.add('js')</script>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="kFrost" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#cfdaff" stop-opacity=".78"/>
+        <stop offset="1" stop-color="#7f9bff" stop-opacity=".38"/>
+      </linearGradient>
+      <linearGradient id="kSolid" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4f78ff"/>
+        <stop offset="1" stop-color="#1236ff"/>
+      </linearGradient>
+      <radialGradient id="kPuff" cx=".35" cy=".3" r=".9">
+        <stop offset="0" stop-color="#fff"/>
+        <stop offset=".6" stop-color="#e3e8ff"/>
+        <stop offset="1" stop-color="#a9b6ea"/>
+      </radialGradient>
+    </defs>
+  </svg>
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="grain" aria-hidden="true"></div>
+  {% block body %}{% endblock %}
+  <script src="{{ url_for('static', filename='js/fx.js') }}" defer></script>
+</body>
+</html>

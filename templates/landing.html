@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_icons.html" import logo, glass %}
+{% block title %}Kumo · Cloud storage that feels light{% endblock %}
+{% block body_class %}page-landing{% endblock %}
+{% block body %}
+<header class="pillnav glass" role="banner">
+  <a class="brand" href="{{ url_for('landing') }}" aria-label="Kumo home">{{ logo(30) }}<span>kumo</span></a>
+  <nav aria-label="Primary">
+    <a href="#features">Features</a>
+    <a href="#start">Get started</a>
+  </nav>
+  {% if user %}
+    <a class="btn btn-primary btn-sm" href="{{ url_for('drive') }}">Open my files</a>
+  {% else %}
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('login') }}">Sign in</a>
+  {% endif %}
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-copy">
+      <h1 aria-label="Your files, lighter than air."><span class="w" style="--i:0" aria-hidden="true">Your</span> <span class="w" style="--i:1" aria-hidden="true">files,</span> <span class="w" style="--i:2" aria-hidden="true">lighter</span> <span class="w" style="--i:3" aria-hidden="true">than</span> <span class="w" style="--i:4" aria-hidden="true">air.</span></h1>
+      <p class="lead">Kumo keeps your documents, photos and projects in one calm place. Drop them in, find them in a second, and send a link when someone needs a copy.</p>
+      <div class="hero-actions">
+        {% if user %}
+          <a class="btn btn-primary btn-lg" href="{{ url_for('drive') }}">Open my files</a>
+        {% else %}
+          <a class="btn btn-primary btn-lg" href="{{ url_for('signup') }}">Create free account</a>
+          <a class="btn btn-lg" href="{{ url_for('login') }}">Sign in</a>
+        {% endif %}
+      </div>
+      <p class="fine">1 GB free. No card needed.</p>
+    </div>
+
+    <div class="scene" aria-hidden="true">
+      <span class="mote" style="--x:20%;--i:0"></span><span class="mote" style="--x:36%;--i:1"></span><span class="mote" style="--x:52%;--i:2"></span><span class="mote" style="--x:66%;--i:3"></span>
+      <div class="cloud-float">
+        <div class="cloud">
+          <span class="puff p1"></span><span class="puff p2"></span><span class="puff p3"></span>
+          <span class="puff p4"></span><span class="puff p5"></span><span class="puff p6"></span>
+        </div>
+      </div>
+      <div class="cloud-shadow"></div>
+      <div class="glass-folder">
+        <span class="gf-back"></span>
+        <span class="gf-paper gf-p1"></span><span class="gf-paper gf-p2"></span><span class="gf-paper gf-p3"></span>
+        <span class="gf-front"></span>
+      </div>
+      <div class="chip glass"><span class="chip-dot">{{ glass('check') }}</span>Uploaded just now</div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="features-head" data-reveal>
+      <h2>Everything you need to keep files close.</h2>
+      <p>No clutter, no learning curve. Four things done well.</p>
+    </div>
+    <div class="feature-list glass">
+      <article data-reveal style="--d:0.00s"><div class="fi">{{ glass('upload') }}</div><div><h3>Drop to upload</h3><p>Drag files anywhere on the page. Large files show live progress, and name clashes sort themselves out.</p></div></article>
+      <article data-reveal style="--d:0.12s"><div class="fi">{{ glass('lock') }}</div><div><h3>Private by default</h3><p>Every file lives in your own space. Nobody can open it unless you choose to share it.</p></div></article>
+      <article data-reveal style="--d:0.24s"><div class="fi">{{ glass('link') }}</div><div><h3>Share with a link</h3><p>Turn a link on for any file, copy it, and turn it off again whenever you like.</p></div></article>
+      <article data-reveal style="--d:0.36s"><div class="fi">{{ glass('search') }}</div><div><h3>Find anything</h3><p>Search across every folder, jump to recent files, and star the ones you reach for daily.</p></div></article>
+    </div>
+  </section>
+
+  <section class="cta" id="start">
+    <div class="cta-card glass" data-reveal>
+      <div>
+        <h2>Start with a clear sky.</h2>
+        <p>Create an account in under a minute and upload your first file.</p>
+      </div>
+      {% if user %}
+        <a class="btn btn-primary btn-lg" href="{{ url_for('drive') }}">Open my files</a>
+      {% else %}
+        <a class="btn btn-primary btn-lg" href="{{ url_for('signup') }}">Create free account</a>
+      {% endif %}
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <span class="brand">{{ logo(24) }}<span>kumo</span></span>
+  <span>雲 means cloud in Japanese.</span>
+</footer>
+{% endblock %}

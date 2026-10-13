@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_icons.html" import logo %}
+{% block title %}My files · Kumo{% endblock %}
+{% block body_class %}page-drive{% endblock %}
+{% block body %}
+<header class="topbar glass">
+  <a class="brand" href="#/" aria-label="Kumo, my files">{{ logo(32) }}<span>kumo</span></a>
+
+  <label class="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Search all files" aria-label="Search all files" autocomplete="off">
+  </label>
+
+  <div class="meter" id="meter" aria-live="polite">
+    <span id="meter-text">Loading…</span>
+    <span class="bar"><i id="meter-bar"></i></span>
+  </div>
+
+  <details class="acct" id="acct">
+    <summary aria-label="Account menu"><span class="avatar">{{ user['name'][:1]|upper }}</span></summary>
+    <div class="acct-panel glass">
+      <strong>{{ user['name'] }}</strong>
+      <span class="muted">{{ user['email'] }}</span>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <button class="btn btn-block" type="submit">Sign out</button>
+      </form>
+    </div>
+  </details>
+</header>
+
+<main class="shell" id="shell">
+  <div class="head">
+    <div>
+      <nav class="crumbs" id="crumbs" aria-label="Folder path"></nav>
+      <h1 id="title">My files</h1>
+    </div>
+    <div class="tools" id="tools">
+      <select id="sort" class="select" aria-label="Sort by">
+        <option value="name">Name</option>
+        <option value="updated">Last modified</option>
+        <option value="size">Size</option>
+      </select>
+      <button class="btn btn-icon" id="mode" type="button" aria-label="Switch layout" title="Switch layout"></button>
+      <button class="btn" id="new-folder" type="button">New folder</button>
+      <button class="btn btn-primary" id="upload-btn" type="button">Upload</button>
+      <button class="btn" id="empty-trash" type="button" hidden>Empty trash</button>
+      <input id="file-input" type="file" multiple hidden>
+    </div>
+  </div>
+
+  <div id="listing" aria-live="polite"><div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+</main>
+
+<nav class="dock glass" aria-label="Views">
+  <span class="dock-ind" aria-hidden="true"></span>
+  <a href="#/" data-view="files"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Files</a>
+  <a href="#/recent" data-view="recent"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Recent</a>
+  <a href="#/starred" data-view="starred"><svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z"/></svg>Starred</a>
+  <a href="#/trash" data-view="trash"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Trash</a>
+</nav>
+
+<div class="dropzone" id="dropzone"><span>Drop files to upload</span></div>
+<div class="uploads glass" id="uploads" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog class="modal" id="dlg-text">
+  <form method="dialog" id="dlg-text-form">
+    <h2 id="dlg-text-title"></h2>
+    <input class="input" id="dlg-text-input" type="text" maxlength="200" autocomplete="off" required>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary" value="ok" id="dlg-text-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal" id="dlg-confirm">
+  <form method="dialog">
+    <h2 id="dlg-confirm-title"></h2>
+    <p class="muted" id="dlg-confirm-body"></p>
+    <div class="modal-actions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn btn-danger" value="ok" id="dlg-confirm-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal preview" id="dlg-preview">
+  <header>
+    <strong id="pv-name"></strong>
+    <span class="pv-actions">
+      <a class="btn btn-sm" id="pv-download" href="#">Download</a>
+      <button class="btn btn-sm btn-icon" id="pv-close" type="button" aria-label="Close preview">✕</button>
+    </span>
+  </header>
+  <div class="pv-body" id="pv-body"></div>
+</dialog>
+
+<script src="{{ url_for('static', filename='js/drive.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,164 @@
+(() => {
+  const root = document.documentElement;
+  const $ = (s, c = document) => c.querySelector(s);
+  const $$ = (s, c = document) => [...c.querySelectorAll(s)];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fine = matchMedia('(hover:hover)').matches;
+
+  /* ---------- DAY / NIGHT ---------- */
+  const saved = (() => { try { return localStorage.getItem('hk-theme'); } catch (e) { return null; } })();
+  root.dataset.theme = saved || 'day';
+  $$('[data-toggle]').forEach(b => b.addEventListener('click', () => {
+    const next = root.dataset.theme === 'day' ? 'night' : 'day';
+    root.dataset.theme = next;
+    try { localStorage.setItem('hk-theme', next); } catch (e) {}
+  }));
+
+  /* ---------- SPLIT HEADLINES ---------- */
+  $$('[data-split]').forEach(el => {
+    let c = 0;
+    const walk = node => {
+      [...node.childNodes].forEach(n => {
+        if (n.nodeType === 3) {
+          const frag = document.createDocumentFragment();
+          n.textContent.split(/(\s+)/).forEach(w => {
+            if (/^\s+$/.test(w)) { frag.append(' '); return; }
+            const word = document.createElement('span');
+            word.style.cssText = 'display:inline-block;white-space:nowrap';
+            [...w].forEach(ch => {
+              const s = document.createElement('span'); s.className = 'ch';
+              const i = document.createElement('i'); i.textContent = ch; i.style.setProperty('--c', c++);
+              s.append(i); word.append(s);
+            });
+            frag.append(word);
+          });
+          n.replaceWith(frag);
+        } else if (n.nodeName !== 'BR') walk(n);
+      });
+    };
+    walk(el);
+    el.setAttribute('aria-label', el.textContent.replace(/\s+/g, ' ').trim());
+  });
+
+  /* ---------- LOAD SEQUENCE ---------- */
+  const start = () => {
+    document.body.classList.remove('loading');
+    setTimeout(() => $('.hero h1').classList.add('in'), reduce ? 0 : 1900);
+    setTimeout(() => $('#nav').classList.add('show'), reduce ? 0 : 3200);
+  };
+  window.addEventListener('load', () => setTimeout(start, reduce ? 0 : 400));
+  let lastY = 0;
+  addEventListener('scroll', () => {
+    const y = scrollY, nav = $('#nav');
+    if (y < 80) nav.classList.add('show');
+    else nav.classList.toggle('show', y < lastY);
+    lastY = y;
+  }, { passive: true });
+
+  /* ---------- REVEALS ---------- */
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { threshold: .2 });
+  $$('.reveal,[data-split]:not(.hero h1),.diagram').forEach(el => io.observe(el));
+
+  /* ---------- NETWORK DIAGRAMS ---------- */
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  $$('.diagram').forEach(svg => {
+    const names = svg.dataset.nodes.split(',');
+    const vert = svg.dataset.v, n = names.length;
+    const [W, H] = svg.getAttribute('viewBox').split(' ').slice(2).map(Number);
+    const pts = names.map((_, i) => vert
+      ? [70, 40 + i * ((H - 80) / (n - 1))]
+      : [60 + i * ((W - 120) / (n - 1)), 44]);
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p.join(' ')).join(' ');
+    const len = vert ? H - 80 : W - 120;
+    const line = mk('path', { d, class: 'ln' });
+    line.style.setProperty('--len', len);
+    svg.append(line);
+    pts.forEach((p, i) => {
+      const g = mk('g', {}); g.style.setProperty('--i', i);
+      const c = mk('circle', { cx: p[0], cy: p[1], r: 7, class: 'nd' }); c.style.setProperty('--i', i);
+      const t = mk('text', vert ? { x: p[0] + 24, y: p[1] + 4 } : { x: p[0], y: p[1] + 34, 'text-anchor': 'middle' });
+      t.textContent = names[i];
+      g.append(c, t); svg.append(g);
+    });
+    const dot = mk('circle', { r: 3, class: 'pulse' });
+    const am = mk('animateMotion', { dur: '7s', repeatCount: 'indefinite', path: d });
+    if (!reduce) { dot.append(am); svg.append(dot); }
+  });
+
+  /* ---------- MAGNETIC BUTTONS + CURSOR ---------- */
+  const cur = $('.cursor');
+  if (fine && !reduce) {
+    $$('.magnetic').forEach(b => {
+      b.addEventListener('mousemove', e => {
+        const r = b.getBoundingClientRect();
+        b.style.transform = `translate(${(e.clientX - r.left - r.width / 2) * .25}px,${(e.clientY - r.top - r.height / 2) * .35}px)`;
+      });
+      b.addEventListener('mouseleave', () => b.style.transform = '');
+    });
+    $$('a,button').forEach(el => {
+      el.addEventListener('mouseenter', () => cur.classList.add('big'));
+      el.addEventListener('mouseleave', () => cur.classList.remove('big'));
+    });
+  }
+
+  /* ---------- POINTER: LIGHT, DEVICE TILT, PROJECT DEPTH ---------- */
+  let mx = 0, my = 0, tx = 0, ty = 0, cx = 0, cy = 0;
+  addEventListener('pointermove', e => {
+    mx = e.clientX / innerWidth - .5; my = e.clientY / innerHeight - .5;
+    root.style.setProperty('--mx', e.clientX + 'px');
+    root.style.setProperty('--my', e.clientY + 'px');
+    cx = e.clientX; cy = e.clientY;
+    cur.classList.add('on');
+  }, { passive: true });
+  $$('[data-tilt]').forEach(c => {
+    if (!fine || reduce) return;
+    c.addEventListener('mousemove', e => {
+      const r = c.getBoundingClientRect();
+      c.style.setProperty('--ty', ((e.clientX - r.left) / r.width - .5) * 4 + 'deg');
+      c.style.setProperty('--tx', -((e.clientY - r.top) / r.height - .5) * 4 + 'deg');
+    });
+    c.addEventListener('mouseleave', () => { c.style.setProperty('--tx', '0deg'); c.style.setProperty('--ty', '0deg'); });
+  });
+
+  /* ---------- RAF LOOP ---------- */
+  const device = $('#device'), device2 = $('#device2'), fl = $$('.fl');
+  const showcase = $('#showcase'), always = $('#always');
+  const base = innerWidth < 900 ? 6 : 14;
+  let px = 0, py = 0, curX = 0, curY = 0;
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+
+  const frame = t => {
+    const vh = innerHeight;
+    // hero device: float + mouse follow
+    if (!reduce) {
+      px += (mx - px) * .06; py += (my - py) * .06;
+      device.style.setProperty('--ry', (-base + px * 14) + 'deg');
+      device.style.setProperty('--rx', (6 - py * 10) + 'deg');
+      device.style.setProperty('--fy', Math.sin(t / 1800) * 12 + 'px');
+      curX += (cx - curX) * .2; curY += (cy - curY) * .2;
+      cur.style.transform = `translate(${curX - 5}px,${curY - 5}px)`;
+    }
+    // showcase: parallax labels + 3D rotation of the PNG (rotate only, never scale/skew)
+    if (showcase) {
+      const r = showcase.getBoundingClientRect();
+      const p = clamp((vh - r.top) / (vh + r.height), 0, 1) - .5;
+      if (!reduce) {
+        fl.forEach(f => f.style.setProperty('--py', p * vh * parseFloat(f.dataset.s) + 'px'));
+        device2.style.setProperty('--ry', p * 36 + 'deg');
+        device2.style.setProperty('--rx', 4 - p * 14 + 'deg');
+        device2.style.setProperty('--fy', -p * 60 + 'px');
+      }
+    }
+    // always running: horizontal day -> night
+    if (always) {
+      const r = always.getBoundingClientRect();
+      const p = clamp(-r.top / (r.height - vh));
+      always.style.setProperty('--p', p.toFixed(4));
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+})();

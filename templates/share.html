@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_icons.html" import logo %}
+{% block title %}{{ item.name }} · Kumo{% endblock %}
+{% block body_class %}page-auth{% endblock %}
+{% block body %}
+<main class="auth">
+  <div class="auth-card glass share-card">
+    <a class="brand" href="{{ url_for('landing') }}">{{ logo(34) }}<span>kumo</span></a>
+    {% if item.preview == 'image' %}
+      <img class="share-img" src="{{ url_for('shared_file', token=token, inline=1) }}" alt="{{ item.name }}">
+    {% endif %}
+    <h1 class="share-name">{{ item.name }}</h1>
+    <p class="muted">Shared by {{ owner }}. <span class="js-size" data-size="{{ item.size }}"></span></p>
+    <a class="btn btn-primary btn-lg btn-block" href="{{ url_for('shared_file', token=token) }}">Download</a>
+  </div>
+</main>
+<script>
+  document.querySelectorAll('.js-size').forEach(el => {
+    let n = +el.dataset.size, u = ['B','KB','MB','GB'], i = 0;
+    while (n >= 1024 && i < 3) { n /= 1024; i++; }
+    el.textContent = (i ? n.toFixed(n < 10 ? 1 : 0) : n) + ' ' + u[i];
+  });
+</script>
+{% endblock %}

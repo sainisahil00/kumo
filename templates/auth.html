@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_icons.html" import logo %}
+{% block title %}{{ 'Create your account' if mode == 'signup' else 'Sign in' }} · Kumo{% endblock %}
+{% block body_class %}page-auth{% endblock %}
+{% block body %}
+<main class="auth">
+  <div class="auth-card glass">
+    <a class="brand" href="{{ url_for('landing') }}" aria-label="Kumo home">{{ logo(38) }}<span>kumo</span></a>
+    <h1>{{ 'Create your account' if mode == 'signup' else 'Welcome back' }}</h1>
+    <p class="muted">{{ 'Get 1 GB of space for your files.' if mode == 'signup' else 'Sign in to open your files.' }}</p>
+
+    {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+
+    <form method="post" novalidate>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      {% if mode == 'signup' %}
+      <div class="field">
+        <label for="name">Name</label>
+        <input id="name" name="name" type="text" autocomplete="name" value="{{ form.get('name', '') }}" required autofocus>
+      </div>
+      {% endif %}
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" value="{{ form.get('email', '') }}" required {{ 'autofocus' if mode == 'login' }}>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="{{ 'new-password' if mode == 'signup' else 'current-password' }}" minlength="{{ 8 if mode == 'signup' else 1 }}" required>
+        {% if mode == 'signup' %}<small>At least 8 characters.</small>{% endif %}
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" type="submit">{{ 'Create account' if mode == 'signup' else 'Sign in' }}</button>
+    </form>
+
+    <p class="switch">
+      {% if mode == 'signup' %}Already have an account? <a href="{{ url_for('login') }}">Sign in</a>
+      {% else %}New to Kumo? <a href="{{ url_for('signup') }}">Create an account</a>{% endif %}
+    </p>
+  </div>
+</main>
+{% endblock %}

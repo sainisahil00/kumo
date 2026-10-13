@@ -1,0 +1,45 @@
+{# Glass icon set: one solid cobalt shape, one frosted shape offset on top. #}
+{% macro logo(size=34) -%}
+<svg class="logo-mark" width="{{ size }}" height="{{ size }}" viewBox="0 0 64 64" aria-hidden="true">
+  <rect width="64" height="64" rx="18" fill="url(#kSolid)"/>
+  <path d="M20 43a8 8 0 0 1-1-15.9A11 11 0 0 1 40.4 25 9 9 0 0 1 44 43z" fill="url(#kPuff)"/>
+</svg>
+{%- endmacro %}
+
+{% macro glass(name) -%}
+{%- if name == 'upload' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <circle cx="48" cy="26" r="15" fill="url(#kSolid)"/>
+  <path d="M22 56a13 13 0 0 1-2-25.8A17 17 0 0 1 52.5 33 11.5 11.5 0 0 1 52 56z" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+  <path d="M37 49V37m0 0-5 5m5-5 5 5" fill="none" stroke="#1236ff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+{%- elif name == 'lock' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <path d="M22 32V24a14 14 0 0 1 28 0v8" fill="none" stroke="url(#kSolid)" stroke-width="8" stroke-linecap="round"/>
+  <rect x="14" y="31" width="44" height="34" rx="11" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+  <circle cx="36" cy="47" r="3.4" fill="#fff" fill-opacity=".9"/>
+</svg>
+{%- elif name == 'link' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <circle cx="50" cy="22" r="14" fill="url(#kSolid)"/>
+  <rect x="10" y="26" width="42" height="36" rx="12" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+  <path d="M26 44h14m0 0-5-5m5 5-5 5" fill="none" stroke="#fff" stroke-opacity=".95" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+{%- elif name == 'search' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <circle cx="30" cy="30" r="20" fill="url(#kSolid)"/>
+  <circle cx="34" cy="34" r="17" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+  <path d="M47 47l13 13" stroke="url(#kSolid)" stroke-width="8" stroke-linecap="round"/>
+</svg>
+{%- elif name == 'folder' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <path d="M8 20a6 6 0 0 1 6-6h14l6 6h22a6 6 0 0 1 6 6v6H8z" fill="url(#kSolid)"/>
+  <rect x="6" y="26" width="58" height="36" rx="10" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+</svg>
+{%- elif name == 'check' -%}
+<svg viewBox="0 0 72 72" aria-hidden="true">
+  <circle cx="30" cy="42" r="14" fill="url(#kFrost)" stroke="rgba(255,255,255,.55)"/>
+  <path d="M16 30l14 14L58 14" fill="none" stroke="url(#kSolid)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+{%- endif -%}
+{%- endmacro %}
