@@ -1,20 +1,28 @@
-"""Kumo - a calm place for your files.
+"""Kumo - a calm place for your files.  (Vercel-ready version)
 
-Run it:   python app.py      then open http://127.0.0.1:5000
-Settings: KUMO_QUOTA_MB (default 1024), KUMO_MAX_UPLOAD_MB (default 512),
-          KUMO_HOST, KUMO_PORT, KUMO_DEBUG=1
+Required environment variables on Vercel:
+    SECRET_KEY          long random string (python -c "import secrets; print(secrets.token_hex(32))")
+    DATABASE_URL        Postgres connection string (Neon, added from Vercel Marketplace)
+    KUMO_AWS_KEY_ID     access key of an IAM user limited to the S3 bucket
+    KUMO_AWS_SECRET     secret key of that IAM user
+Optional:
+    KUMO_S3_BUCKET (default kumo-s3-storage), KUMO_S3_REGION (default ap-south-1),
+    KUMO_QUOTA_MB (default 1024), KUMO_MAX_UPLOAD_MB (default 4 on Vercel, 512 elsewhere)
+
+Local run:  set the same variables, then  python app.py
 """
 import mimetypes
 import os
 import re
 import secrets
-import sqlite3
 import time
 import uuid
 from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
+import psycopg2
+import psycopg2.extras
 from flask import (Flask, abort, g, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -22,15 +30,15 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE = Path(__file__).resolve().parent
 INSTANCE = BASE / "instance"
 STORAGE = INSTANCE / "storage"
-DB_PATH = INSTANCE / "kumo.db"
-INSTANCE.mkdir(exist_ok=True)
-STORAGE.mkdir(exist_ok=True)
+ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 QUOTA = int(float(os.environ.get("KUMO_QUOTA_MB", 1024)) * 1024 * 1024)
-MAX_UPLOAD = int(float(os.environ.get("KUMO_MAX_UPLOAD_MB", 512)) * 1024 * 1024)
+# Vercel functions reject request bodies above ~4.5 MB, so uploads through Flask stay small there.
+MAX_UPLOAD = int(float(os.environ.get("KUMO_MAX_UPLOAD_MB", 4 if ON_VERCEL else 512)) * 1024 * 1024)
 
-# S3 storage. On EC2 the instance role (kumo-role) supplies credentials, so no keys are needed.
-# For local development without AWS, run with KUMO_S3_BUCKET="" to keep files on disk.
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# S3 storage. Set KUMO_S3_BUCKET="" to keep files on local disk (local development only).
 S3_BUCKET = os.environ.get("KUMO_S3_BUCKET", "kumo-s3-storage")
 S3_REGION = os.environ.get("KUMO_S3_REGION", "ap-south-1")
 USE_S3 = bool(S3_BUCKET)
@@ -38,7 +46,15 @@ if USE_S3:
     import boto3
     from botocore.config import Config
     from botocore.exceptions import BotoCoreError, ClientError
-    s3 = boto3.client("s3", region_name=S3_REGION, config=Config(signature_version="s3v4"))
+    # Explicit keys from env vars (Vercel). If they are not set, boto3 falls back to its
+    # normal lookup, which includes the EC2 instance role.
+    s3 = boto3.client(
+        "s3", region_name=S3_REGION,
+        aws_access_key_id=os.environ.get("KUMO_AWS_KEY_ID") or None,
+        aws_secret_access_key=os.environ.get("KUMO_AWS_SECRET") or None,
+        config=Config(signature_version="s3v4"))
+else:
+    STORAGE.mkdir(parents=True, exist_ok=True)
 
 
 def s3_key(uid, stored_name):
@@ -46,10 +62,17 @@ def s3_key(uid, stored_name):
 
 
 def load_secret():
-    path = INSTANCE / "secret.key"
-    if not path.exists():
-        path.write_text(secrets.token_hex(32))
-    return path.read_text().strip()
+    env = os.environ.get("SECRET_KEY")
+    if env:
+        return env
+    path = INSTANCE / "secret.key"  # local development fallback only
+    try:
+        INSTANCE.mkdir(exist_ok=True)
+        if not path.exists():
+            path.write_text(secrets.token_hex(32))
+        return path.read_text().strip()
+    except OSError:
+        raise RuntimeError("SECRET_KEY environment variable is not set.")
 
 
 app = Flask(__name__)
@@ -58,50 +81,60 @@ app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD + 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=ON_VERCEL,
     PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30,
 )
 
 # --------------------------------------------------------------------------
-# Database
+# Database (Postgres)
 # --------------------------------------------------------------------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     pw_hash TEXT NOT NULL,
-    created_at REAL NOT NULL
+    created_at DOUBLE PRECISION NOT NULL
 );
 CREATE TABLE IF NOT EXISTS items (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    parent_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id BIGINT REFERENCES items(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     is_folder INTEGER NOT NULL DEFAULT 0,
-    size INTEGER NOT NULL DEFAULT 0,
+    size BIGINT NOT NULL DEFAULT 0,
     mime TEXT,
     stored_name TEXT,
     starred INTEGER NOT NULL DEFAULT 0,
     share_token TEXT UNIQUE,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL,
-    deleted_at REAL
+    created_at DOUBLE PRECISION NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL,
+    deleted_at DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS idx_items_user_parent ON items(user_id, parent_id);
 """
 
 
+def connect():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is not set.")
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+
+
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.executescript(SCHEMA)
+    conn = connect()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(SCHEMA)
+    except psycopg2.Error:
+        app.logger.exception("init_db failed (tables may already exist)")
+    finally:
+        conn.close()
 
 
 def db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        g.db = connect()
     return g.db
 
 
@@ -113,11 +146,27 @@ def close_db(_exc):
 
 
 def q(sql, args=()):
-    return db().execute(sql, args).fetchall()
+    with db().cursor() as cur:
+        cur.execute(sql, args)
+        return cur.fetchall()
 
 
 def q1(sql, args=()):
-    return db().execute(sql, args).fetchone()
+    with db().cursor() as cur:
+        cur.execute(sql, args)
+        return cur.fetchone()
+
+
+def ex(sql, args=()):
+    with db().cursor() as cur:
+        cur.execute(sql, args)
+
+
+def insert(sql, args=()):
+    """Run an INSERT and return the new row id."""
+    with db().cursor() as cur:
+        cur.execute(sql + " RETURNING id", args)
+        return cur.fetchone()["id"]
 
 
 # --------------------------------------------------------------------------
@@ -128,7 +177,7 @@ def current_user():
     if not uid:
         return None
     if "user" not in g:
-        g.user = q1("SELECT * FROM users WHERE id = ?", (uid,))
+        g.user = q1("SELECT * FROM users WHERE id = %s", (uid,))
     return g.user
 
 
@@ -170,7 +219,7 @@ def headers(resp):
     return resp
 
 
-FAILS = {}
+FAILS = {}  # per-instance on serverless; still slows down a burst of guesses
 
 
 def throttled(ip):
@@ -264,17 +313,17 @@ def err(message, status=400):
 
 def user_dir(uid):
     path = STORAGE / str(uid)
-    path.mkdir(exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def used_bytes(uid):
-    return q1("SELECT COALESCE(SUM(size), 0) AS n FROM items WHERE user_id = ? AND is_folder = 0",
-              (uid,))["n"]
+    return q1("SELECT COALESCE(SUM(size), 0)::bigint AS n FROM items "
+              "WHERE user_id = %s AND is_folder = 0", (uid,))["n"]
 
 
 def get_item(iid, uid, include_deleted=False):
-    sql = "SELECT * FROM items WHERE id = ? AND user_id = ?"
+    sql = "SELECT * FROM items WHERE id = %s AND user_id = %s"
     if not include_deleted:
         sql += " AND deleted_at IS NULL"
     row = q1(sql, (iid, uid))
@@ -295,7 +344,7 @@ def get_folder(fid, uid):
 def subtree(iid, uid):
     return q(
         """WITH RECURSIVE t(id) AS (
-               SELECT id FROM items WHERE id = ? AND user_id = ?
+               SELECT id FROM items WHERE id = %s AND user_id = %s
                UNION ALL
                SELECT i.id FROM items i JOIN t ON i.parent_id = t.id)
            SELECT items.* FROM items JOIN t ON items.id = t.id""",
@@ -305,8 +354,9 @@ def subtree(iid, uid):
 def unique_name(uid, parent_id, name, is_folder, exclude_id=None):
     stem, ext = (name, "") if is_folder else os.path.splitext(name)
     candidate, n = name, 1
-    while q1("""SELECT 1 FROM items WHERE user_id = ? AND parent_id IS ? AND name = ? COLLATE NOCASE
-                AND deleted_at IS NULL AND id IS NOT ?""",
+    while q1("""SELECT 1 FROM items WHERE user_id = %s AND parent_id IS NOT DISTINCT FROM %s
+                AND lower(name) = lower(%s) AND deleted_at IS NULL
+                AND id IS DISTINCT FROM %s""",
              (uid, parent_id, candidate, exclude_id)):
         candidate = f"{stem} ({n}){ext}"
         n += 1
@@ -376,16 +426,16 @@ def signup():
             error = "Enter a valid email address."
         elif len(password) < 8:
             error = "Use a password with at least 8 characters."
-        elif q1("SELECT 1 FROM users WHERE email = ?", (form["email"],)):
+        elif q1("SELECT 1 FROM users WHERE email = %s", (form["email"],)):
             error = "An account with that email already exists. Try signing in."
         else:
-            cur = db().execute(
-                "INSERT INTO users (name, email, pw_hash, created_at) VALUES (?, ?, ?, ?)",
+            new_id = insert(
+                "INSERT INTO users (name, email, pw_hash, created_at) VALUES (%s, %s, %s, %s)",
                 (form["name"], form["email"], generate_password_hash(password), time.time()))
             db().commit()
             session.clear()
             session.permanent = True
-            session["uid"] = cur.lastrowid
+            session["uid"] = new_id
             return redirect(url_for("drive"))
     return render_template("auth.html", mode="signup", error=error, form=form)
 
@@ -397,8 +447,8 @@ def login():
     error, form = None, {}
     if request.method == "POST":
         form = {"email": request.form.get("email", "").strip().lower()[:200]}
-        ip = request.remote_addr or "?"
-        user = q1("SELECT * FROM users WHERE email = ?", (form["email"],))
+        ip = (request.headers.get("X-Forwarded-For", request.remote_addr) or "?").split(",")[0].strip()
+        user = q1("SELECT * FROM users WHERE email = %s", (form["email"],))
         if throttled(ip):
             error = "Too many attempts. Wait a few minutes and try again."
         elif user and check_password_hash(user["pw_hash"], request.form.get("password", "")):
@@ -439,30 +489,30 @@ def list_items():
 
     if view == "files":
         folder = get_folder(folder_id, uid)
-        rows = q("SELECT * FROM items WHERE user_id = ? AND parent_id IS ? AND deleted_at IS NULL",
-                 (uid, folder_id))
+        rows = q("SELECT * FROM items WHERE user_id = %s AND parent_id IS NOT DISTINCT FROM %s "
+                 "AND deleted_at IS NULL", (uid, folder_id))
         if folder:
             path = [dict(r) for r in q(
                 """WITH RECURSIVE up(id, parent_id, name, depth) AS (
-                       SELECT id, parent_id, name, 0 FROM items WHERE id = ? AND user_id = ?
+                       SELECT id, parent_id, name, 0 FROM items WHERE id = %s AND user_id = %s
                        UNION ALL
                        SELECT i.id, i.parent_id, i.name, up.depth + 1
                        FROM items i JOIN up ON i.id = up.parent_id)
                    SELECT id, name FROM up ORDER BY depth DESC""", (folder_id, uid))]
     elif view == "recent":
-        rows = q("""SELECT * FROM items WHERE user_id = ? AND is_folder = 0 AND deleted_at IS NULL
+        rows = q("""SELECT * FROM items WHERE user_id = %s AND is_folder = 0 AND deleted_at IS NULL
                     ORDER BY updated_at DESC LIMIT 40""", (uid,))
     elif view == "starred":
-        rows = q("SELECT * FROM items WHERE user_id = ? AND starred = 1 AND deleted_at IS NULL", (uid,))
+        rows = q("SELECT * FROM items WHERE user_id = %s AND starred = 1 AND deleted_at IS NULL", (uid,))
     elif view == "trash":
         rows = q("""SELECT i.* FROM items i LEFT JOIN items p ON p.id = i.parent_id
-                    WHERE i.user_id = ? AND i.deleted_at IS NOT NULL
-                      AND (p.id IS NULL OR p.deleted_at IS NULL OR p.deleted_at != i.deleted_at)
+                    WHERE i.user_id = %s AND i.deleted_at IS NOT NULL
+                      AND (p.id IS NULL OR p.deleted_at IS NULL OR p.deleted_at <> i.deleted_at)
                     ORDER BY i.deleted_at DESC""", (uid,))
     elif view == "search":
         like = "%" + re.sub(r"([%_\\])", r"\\\1", term) + "%"
-        rows = q("""SELECT * FROM items WHERE user_id = ? AND deleted_at IS NULL
-                    AND name LIKE ? ESCAPE '\\' LIMIT 200""", (uid, like))
+        rows = q("""SELECT * FROM items WHERE user_id = %s AND deleted_at IS NULL
+                    AND name ILIKE %s ESCAPE '\\' LIMIT 200""", (uid, like))
     else:
         return err("Unknown view.")
 
@@ -480,11 +530,11 @@ def create_folder():
     get_folder(parent_id, uid)
     name = unique_name(uid, parent_id, clean_name(data.get("name"), "New folder"), True)
     now = time.time()
-    cur = db().execute(
+    new_id = insert(
         """INSERT INTO items (user_id, parent_id, name, is_folder, created_at, updated_at)
-           VALUES (?, ?, ?, 1, ?, ?)""", (uid, parent_id, name, now, now))
+           VALUES (%s, %s, %s, 1, %s, %s)""", (uid, parent_id, name, now, now))
     db().commit()
-    return jsonify(item=serialize(get_item(cur.lastrowid, uid))), 201
+    return jsonify(item=serialize(get_item(new_id, uid))), 201
 
 
 @app.post("/api/upload")
@@ -523,11 +573,12 @@ def upload():
                 return err("Not enough space left. Delete some files or empty the trash.", 413)
         now = time.time()
         mime = mimetypes.guess_type(name)[0] or f.mimetype or "application/octet-stream"
-        cur = db().execute(
+        new_id = insert(
             """INSERT INTO items (user_id, parent_id, name, size, mime, stored_name, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (uid, parent_id, name, size, mime, stored, now, now))
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (uid, parent_id, name, size, mime, stored, now, now))
         db().commit()
-        created.append(serialize(get_item(cur.lastrowid, uid)))
+        created.append(serialize(get_item(new_id, uid)))
     return jsonify(items=created), 201
 
 
@@ -588,10 +639,10 @@ def update_item(iid):
     if "parent_id" in data or "name" in data:
         if (parent_id, name.lower()) != (row["parent_id"], row["name"].lower()) or "parent_id" in data:
             name = unique_name(uid, parent_id, name, bool(row["is_folder"]), exclude_id=iid)
-        db().execute("UPDATE items SET parent_id = ?, name = ?, updated_at = ? WHERE id = ?",
-                     (parent_id, name, time.time(), iid))
+        ex("UPDATE items SET parent_id = %s, name = %s, updated_at = %s WHERE id = %s",
+           (parent_id, name, time.time(), iid))
     if "starred" in data:
-        db().execute("UPDATE items SET starred = ? WHERE id = ?", (1 if data["starred"] else 0, iid))
+        ex("UPDATE items SET starred = %s WHERE id = %s", (1 if data["starred"] else 0, iid))
     db().commit()
     return jsonify(item=serialize(get_item(iid, uid)))
 
@@ -602,9 +653,8 @@ def trash_item(iid):
     uid = current_user()["id"]
     get_item(iid, uid)
     ids = [r["id"] for r in subtree(iid, uid)]
-    marks = ",".join("?" * len(ids))
-    db().execute(f"UPDATE items SET deleted_at = ? WHERE id IN ({marks}) AND deleted_at IS NULL",
-                 [time.time(), *ids])
+    ex("UPDATE items SET deleted_at = %s WHERE id = ANY(%s) AND deleted_at IS NULL",
+       (time.time(), ids))
     db().commit()
     return jsonify(ok=True)
 
@@ -618,13 +668,11 @@ def restore_item(iid):
         return jsonify(ok=True)
     stamp = row["deleted_at"]
     ids = [r["id"] for r in subtree(iid, uid)]
-    marks = ",".join("?" * len(ids))
-    db().execute(f"UPDATE items SET deleted_at = NULL WHERE id IN ({marks}) AND deleted_at = ?",
-                 [*ids, stamp])
-    parent = q1("SELECT * FROM items WHERE id = ?", (row["parent_id"],)) if row["parent_id"] else None
+    ex("UPDATE items SET deleted_at = NULL WHERE id = ANY(%s) AND deleted_at = %s", (ids, stamp))
+    parent = q1("SELECT * FROM items WHERE id = %s", (row["parent_id"],)) if row["parent_id"] else None
     parent_id = row["parent_id"] if parent and parent["deleted_at"] is None else None
     name = unique_name(uid, parent_id, row["name"], bool(row["is_folder"]), exclude_id=iid)
-    db().execute("UPDATE items SET parent_id = ?, name = ? WHERE id = ?", (parent_id, name, iid))
+    ex("UPDATE items SET parent_id = %s, name = %s WHERE id = %s", (parent_id, name, iid))
     db().commit()
     return jsonify(ok=True)
 
@@ -632,7 +680,7 @@ def restore_item(iid):
 def purge(iid, uid):
     rows = subtree(iid, uid)
     remove_files(rows)
-    db().execute("DELETE FROM items WHERE id = ? AND user_id = ?", (iid, uid))
+    ex("DELETE FROM items WHERE id = %s AND user_id = %s", (iid, uid))
     db().commit()
 
 
@@ -652,8 +700,8 @@ def purge_item(iid):
 def empty_trash():
     uid = current_user()["id"]
     tops = q("""SELECT i.id FROM items i LEFT JOIN items p ON p.id = i.parent_id
-                WHERE i.user_id = ? AND i.deleted_at IS NOT NULL
-                  AND (p.id IS NULL OR p.deleted_at IS NULL OR p.deleted_at != i.deleted_at)""", (uid,))
+                WHERE i.user_id = %s AND i.deleted_at IS NOT NULL
+                  AND (p.id IS NULL OR p.deleted_at IS NULL OR p.deleted_at <> i.deleted_at)""", (uid,))
     for r in tops:
         purge(r["id"], uid)
     return jsonify(ok=True)
@@ -668,7 +716,7 @@ def share_item(iid):
         return err("Only files can be shared with a link.")
     enabled = bool((request.get_json(silent=True) or {}).get("enabled", True))
     token = (row["share_token"] or secrets.token_urlsafe(16)) if enabled else None
-    db().execute("UPDATE items SET share_token = ? WHERE id = ?", (token, iid))
+    ex("UPDATE items SET share_token = %s WHERE id = %s", (token, iid))
     db().commit()
     return jsonify(url=url_for("shared", token=token, _external=True) if token else None,
                    item=serialize(get_item(iid, uid)))
@@ -686,7 +734,7 @@ def share_link(iid):
 # Public share pages
 # --------------------------------------------------------------------------
 def shared_row(token):
-    row = q1("SELECT * FROM items WHERE share_token = ? AND deleted_at IS NULL", (token,))
+    row = q1("SELECT * FROM items WHERE share_token = %s AND deleted_at IS NULL", (token,))
     if row is None:
         abort(404, description="This link is no longer active.")
     return row
@@ -695,7 +743,7 @@ def shared_row(token):
 @app.get("/s/<token>")
 def shared(token):
     row = shared_row(token)
-    owner = q1("SELECT name FROM users WHERE id = ?", (row["user_id"],))
+    owner = q1("SELECT name FROM users WHERE id = %s", (row["user_id"],))
     return render_template("share.html", item=serialize(row), owner=owner["name"], token=token)
 
 
